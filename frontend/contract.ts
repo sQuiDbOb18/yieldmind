@@ -1,11 +1,56 @@
 export const CONTRACT_ADDRESS = "0x1Fa60f862190BBf44A75E0210AFdF51C7F4a9bf1";
 
 export const CONTRACT_ABI = [
-  "function deposit() external payable",
-  "function withdraw(uint256 amount) external",
-  "function rebalance(string memory newAllocation, string memory reason) external",
-  "function currentAllocation() view returns (string)",
-  "function totalDeposits() view returns (uint256)",
-  "function balances(address) view returns (uint256)",
-  "function getVaultBalance() view returns (uint256)",
-];
+  {
+    type: "function",
+    name: "deposit",
+    inputs: [],
+    outputs: [],
+    stateMutability: "payable",
+  },
+  {
+    type: "function",
+    name: "withdraw",
+    inputs: [{ name: "amount", type: "uint256" }],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "rebalance",
+    inputs: [
+      { name: "newAllocation", type: "string" },
+      { name: "reason", type: "string" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "currentAllocation",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "totalDeposits",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "balances",
+    inputs: [{ name: "", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "getVaultBalance",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+] as const;
