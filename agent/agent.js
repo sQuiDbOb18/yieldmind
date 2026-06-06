@@ -1,92 +1,175 @@
-const { ethers } = require("ethers");
-const cron = require("node-cron");
+const fs = require("node:fs");
+const path = require("node:path");
 const axios = require("axios");
-require("dotenv").config({ path: "../.env" });
+const cron = require("node-cron");
+const { ethers } = require("ethers");
+require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
-// ← Paste your deployed contract address here
-const CONTRACT_ADDRESS = "0x1Fa60f862190BBf44A75E0210AFdF51C7F4a9bf1";
+const RPC_URL = "https://rpc.sepolia.mantle.xyz";
+const CONTRACT_FILE = path.resolve(__dirname, "../frontend/contract.ts");
+const REBALANCE_THRESHOLD = 0.5;
+const CHECK_INTERVAL = "0 * * * *";
+const ASSETS = {
+  meth: "mETH",
+  usdy: "USDY",
+};
 
-// This is your contract's ABI — tells the agent what functions exist
 const ABI = [
   "function rebalance(string memory newAllocation, string memory reason) external",
   "function currentAllocation() view returns (string)",
   "function totalDeposits() view returns (uint256)",
 ];
 
-// Connect to Mantle testnet
-const provider = new ethers.JsonRpcProvider("https://rpc.sepolia.mantle.xyz");
-const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
-const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, wallet);
+function loadContractAddress() {
+  const source = fs.readFileSync(CONTRACT_FILE, "utf8");
+  const match = source.match(/CONTRACT_ADDRESS\s*=\s*"([^"]+)"/);
 
-// ---- FETCH YIELD RATES ----
+  if (!match) {
+    throw new Error("CONTRACT_ADDRESS is missing from frontend/contract.ts");
+  }
+
+  return ethers.getAddress(match[1]);
+}
+
+function requirePrivateKey() {
+  const privateKey = process.env.PRIVATE_KEY?.trim();
+
+  if (!privateKey) {
+    throw new Error("PRIVATE_KEY is missing from .env");
+  }
+
+  return privateKey;
+}
+
+function toApy(value) {
+  const apy = Number(value);
+
+  if (!Number.isFinite(apy) || apy < 0) {
+    return null;
+  }
+
+  return apy;
+}
+
+async function fetchMethApy() {
+  const response = await axios.get("https://api.mantle.xyz/api/v1/meth/apy", { timeout: 10000 });
+  const candidates = [
+    response.data?.apy,
+    response.data?.data?.apy,
+    response.data?.data?.stakingApy,
+    response.data?.stakingApy,
+  ];
+
+  for (const candidate of candidates) {
+    const apy = toApy(candidate);
+
+    if (apy !== null) {
+      return apy;
+    }
+  }
+
+  throw new Error("mETH APY response did not include a numeric rate");
+}
+
+async function fetchUsdyApy() {
+  const response = await axios.get("https://yields.llama.fi/pools", { timeout: 15000 });
+  const pools = response.data?.data;
+
+  if (!Array.isArray(pools)) {
+    throw new Error("USDY APY response did not include pools");
+  }
+
+  const pool = pools
+    .filter((item) => {
+      const symbol = String(item.symbol ?? "").toUpperCase();
+      const project = String(item.project ?? "").toLowerCase();
+      return symbol.includes("USDY") || project.includes("ondo");
+    })
+    .sort((left, right) => Number(right.tvlUsd ?? 0) - Number(left.tvlUsd ?? 0))[0];
+
+  const apy = toApy(pool?.apy);
+
+  if (apy === null) {
+    throw new Error("USDY APY response did not include a numeric rate");
+  }
+
+  return apy;
+}
+
 async function getYieldRates() {
-  try {
-    // Fetch mETH staking APY from Mantle
-    const methResponse = await axios.get(
-      "https://api.mantle.xyz/api/v1/meth/apy"
-    );
-    const methAPY = methResponse.data?.apy || 4.5; // fallback to 4.5% if API fails
-
-    // USDY yield is relatively stable around 4-5% — we'll use a public API
-    const usdyAPY = 4.8; // USDY typically tracks T-bill rates ~4.8%
-
-    console.log(`📊 Current Rates — mETH: ${methAPY}% | USDY: ${usdyAPY}%`);
-
-    return { methAPY, usdyAPY };
-  } catch (error) {
-    console.log("⚠️ Could not fetch live rates, using defaults");
-    return { methAPY: 4.5, usdyAPY: 4.8 };
-  }
+  const [methApy, usdyApy] = await Promise.all([fetchMethApy(), fetchUsdyApy()]);
+  return { methApy, usdyApy };
 }
 
-// ---- MAIN REBALANCE LOGIC ----
-async function checkAndRebalance() {
-  console.log("\n🤖 Agent running at:", new Date().toLocaleString());
+function pickAllocation(currentAllocation, rates) {
+  const spread = rates.methApy - rates.usdyApy;
+  const absoluteSpread = Math.abs(spread);
 
-  try {
-    // Get current allocation from contract
-    const currentAllocation = await contract.currentAllocation();
-    console.log("📍 Current allocation:", currentAllocation);
-
-    // Get yield rates
-    const { methAPY, usdyAPY } = await getYieldRates();
-
-    // Decision logic — only move if difference is more than 0.5%
-    const THRESHOLD = 0.5;
-    let newAllocation = currentAllocation;
-    let reason = "No rebalance needed";
-
-    if (methAPY > usdyAPY + THRESHOLD && currentAllocation !== "mETH") {
-      newAllocation = "mETH";
-      reason = `mETH APY (${methAPY}%) is ${(methAPY - usdyAPY).toFixed(2)}% higher than USDY`;
-    } else if (usdyAPY > methAPY + THRESHOLD && currentAllocation !== "USDY") {
-      newAllocation = "USDY";
-      reason = `USDY APY (${usdyAPY}%) is ${(usdyAPY - methAPY).toFixed(2)}% higher than mETH`;
-    }
-
-    // If rebalance needed, call the contract
-    if (newAllocation !== currentAllocation) {
-      console.log(`🔄 Rebalancing: ${currentAllocation} → ${newAllocation}`);
-      console.log(`📝 Reason: ${reason}`);
-
-      const tx = await contract.rebalance(newAllocation, reason);
-      await tx.wait();
-
-      console.log("✅ Rebalanced successfully! TX:", tx.hash);
-    } else {
-      console.log("✅ No rebalance needed — staying in", currentAllocation);
-    }
-  } catch (error) {
-    console.error("❌ Agent error:", error.message);
+  if (absoluteSpread <= REBALANCE_THRESHOLD) {
+    return null;
   }
+
+  const target = spread > 0 ? ASSETS.meth : ASSETS.usdy;
+
+  if (currentAllocation === target) {
+    return null;
+  }
+
+  const leader = target;
+  const laggard = target === ASSETS.meth ? ASSETS.usdy : ASSETS.meth;
+
+  return {
+    target,
+    reason: `${leader} yield leads ${laggard} by ${absoluteSpread.toFixed(2)}%`,
+  };
 }
 
-// ---- START THE AGENT ----
-console.log("🚀 YieldMind Agent starting...");
-console.log("⏰ Will check yields every hour");
+async function checkAndRebalance(contract) {
+  const startedAt = new Date().toISOString();
+  console.log(`YieldMind agent check started at ${startedAt}`);
 
-// Run immediately on startup
-checkAndRebalance();
+  const currentAllocation = await contract.currentAllocation();
+  const rates = await getYieldRates();
+  const decision = pickAllocation(currentAllocation, rates);
 
-// Then run every hour (at minute 0 of every hour)
-cron.schedule("0 * * * *", checkAndRebalance);
+  console.log(
+    `Rates: mETH ${rates.methApy.toFixed(2)}%, USDY ${rates.usdyApy.toFixed(2)}%, allocation ${currentAllocation}`,
+  );
+
+  if (!decision) {
+    console.log("No rebalance submitted");
+    return;
+  }
+
+  console.log(`Rebalancing to ${decision.target}: ${decision.reason}`);
+  const transaction = await contract.rebalance(decision.target, decision.reason);
+  const receipt = await transaction.wait();
+  console.log(`Rebalance confirmed in block ${receipt.blockNumber}: ${transaction.hash}`);
+}
+
+function createContract() {
+  const provider = new ethers.JsonRpcProvider(RPC_URL);
+  const wallet = new ethers.Wallet(requirePrivateKey(), provider);
+  return new ethers.Contract(loadContractAddress(), ABI, wallet);
+}
+
+async function run() {
+  const contract = createContract();
+
+  await checkAndRebalance(contract).catch((error) => {
+    console.error(`Agent check failed: ${error.message}`);
+  });
+
+  cron.schedule(CHECK_INTERVAL, () => {
+    checkAndRebalance(contract).catch((error) => {
+      console.error(`Agent check failed: ${error.message}`);
+    });
+  });
+
+  console.log("YieldMind agent is running");
+}
+
+run().catch((error) => {
+  console.error(`YieldMind agent failed to start: ${error.message}`);
+  process.exitCode = 1;
+});

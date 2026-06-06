@@ -1,13 +1,15 @@
 {
   "name": "yieldmind",
   "version": "1.0.0",
-  "description": "This project showcases a Hardhat 3 project using `mocha` for tests and the `ethers` library for Ethereum interactions.",
+  "description": "AI-powered yield optimizer for Mantle Testnet.",
   "main": "index.js",
   "directories": {
     "test": "test"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:mantle": "hardhat run scripts/deploy.ts --network mantleTestnet"
   },
   "repository": {
     "type": "git",

@@ -23,7 +23,7 @@ declare global {
 
 type RebalanceRecord = {
   id: string;
-  time: string;
+  timestamp: number;
   from: string;
   to: string;
   reason: string;
@@ -39,7 +39,6 @@ const zeroAddress = "0x0000000000000000000000000000000000000000" as const;
 const rebalanceEvent = parseAbiItem(
   "event Rebalanced(string from, string to, uint256 timestamp, string reason)",
 );
-
 const fallbackYieldRates: YieldRates = {
   mETH: 5.18,
   USDY: 4.72,
@@ -55,8 +54,39 @@ function formatMnt(value?: bigint) {
   return Number(formatEther(value)).toFixed(4);
 }
 
+function mntNumber(value?: bigint) {
+  if (!value) {
+    return 0;
+  }
+
+  return Number(formatEther(value));
+}
+
 function formatPercent(value: number) {
   return `${value.toFixed(2)}%`;
+}
+
+function formatTimer(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function timeAgo(timestamp: number) {
+  const seconds = Math.max(1, Math.floor((Date.now() - timestamp) / 1000));
+
+  if (seconds < 60) {
+    return `${seconds}s ago`;
+  }
+
+  const minutes = Math.floor(seconds / 60);
+
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ago`;
 }
 
 function toRate(value: unknown) {
@@ -106,22 +136,22 @@ export default function Home() {
   const [depositAmount, setDepositAmount] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [walletError, setWalletError] = useState("");
-  const [minutesRemaining, setMinutesRemaining] = useState(60);
+  const [secondsRemaining, setSecondsRemaining] = useState(3600);
   const [history, setHistory] = useState<RebalanceRecord[]>([]);
   const [yieldRates, setYieldRates] = useState<YieldRates>(fallbackYieldRates);
+  const [depositPending, setDepositPending] = useState(false);
+  const [withdrawPending, setWithdrawPending] = useState(false);
+  const [rebalancePending, setRebalancePending] = useState(false);
+  const [depositSuccess, setDepositSuccess] = useState(false);
+  const [withdrawSuccess, setWithdrawSuccess] = useState(false);
+  const [rebalanceSuccess, setRebalanceSuccess] = useState(false);
 
   const publicClient = usePublicClient();
+  const queryClient = useQueryClient();
   const { address, isConnected } = useAccount();
   const { connect } = useConnect();
   const { disconnect } = useDisconnect();
   const { writeContractAsync } = useWriteContract();
-  const [depositPending, setDepositPending] = useState(false);
-  const [withdrawPending, setWithdrawPending] = useState(false);
-  const [rebalancePending, setRebalancePending] = useState(false);
-  const [rebalanceSuccess, setRebalanceSuccess] = useState(false);
-  const [depositSuccess, setDepositSuccess] = useState("");
-  const [withdrawSuccess, setWithdrawSuccess] = useState("");
-  const queryClient = useQueryClient();
 
   const { data: currentAllocation } = useReadContract({
     address: vaultAddress,
@@ -159,12 +189,15 @@ export default function Home() {
     },
   });
 
-  const allocation = currentAllocation?.toString() ?? "Loading";
+  const allocation = currentAllocation?.toString();
+  const displayAllocation = allocation ?? "Loading";
   const isMeth = allocation === "mETH";
   const canManualRebalance = allocation === "USDY" || allocation === "mETH";
   const nextAllocation = allocation === "USDY" ? "mETH" : "USDY";
-  const methWidth = `${Math.min(100, (yieldRates.mETH / 6) * 100)}%`;
-  const usdyWidth = `${Math.min(100, (yieldRates.USDY / 6) * 100)}%`;
+  const winningAsset = yieldRates.mETH >= yieldRates.USDY ? "mETH" : "USDY";
+  const maxYield = Math.max(yieldRates.mETH, yieldRates.USDY, 1);
+  const methWidth = `${Math.max(8, (yieldRates.mETH / maxYield) * 100)}%`;
+  const usdyWidth = `${Math.max(8, (yieldRates.USDY / maxYield) * 100)}%`;
 
   const shortAddress = useMemo(() => {
     if (!address) {
@@ -179,7 +212,7 @@ export default function Home() {
       const now = new Date();
       const nextHour = new Date(now);
       nextHour.setHours(now.getHours() + 1, 0, 0, 0);
-      setMinutesRemaining(Math.max(1, Math.ceil((nextHour.getTime() - now.getTime()) / 60000)));
+      setSecondsRemaining(Math.max(1, Math.ceil((nextHour.getTime() - now.getTime()) / 1000)));
     };
 
     updateCountdown();
@@ -235,7 +268,7 @@ export default function Home() {
 
           return {
             id: `${log.blockNumber}-${log.transactionHash}`,
-            time: timestamp ? new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "--",
+            timestamp,
             from: String(log.args.from ?? "--"),
             to: String(log.args.to ?? "--"),
             reason: String(log.args.reason ?? "--"),
@@ -271,7 +304,7 @@ export default function Home() {
 
     try {
       setDepositPending(true);
-      setDepositSuccess("");
+      setDepositSuccess(false);
       const hash = await writeContractAsync({
         address: vaultAddress,
         abi: CONTRACT_ABI,
@@ -286,7 +319,8 @@ export default function Home() {
 
       await queryClient.invalidateQueries();
       setDepositAmount("");
-      setDepositSuccess("Deposit successful.");
+      setDepositSuccess(true);
+      window.setTimeout(() => setDepositSuccess(false), 1800);
     } catch (error) {
       console.error("Deposit failed:", error);
     } finally {
@@ -303,7 +337,7 @@ export default function Home() {
 
     try {
       setWithdrawPending(true);
-      setWithdrawSuccess("");
+      setWithdrawSuccess(false);
       const hash = await writeContractAsync({
         address: vaultAddress,
         abi: CONTRACT_ABI,
@@ -318,7 +352,8 @@ export default function Home() {
 
       await queryClient.invalidateQueries();
       setWithdrawAmount("");
-      setWithdrawSuccess("Withdrawal successful.");
+      setWithdrawSuccess(true);
+      window.setTimeout(() => setWithdrawSuccess(false), 1800);
     } catch (error) {
       console.error("Withdraw failed:", error);
     } finally {
@@ -348,7 +383,7 @@ export default function Home() {
 
       await queryClient.invalidateQueries();
       setRebalanceSuccess(true);
-      window.setTimeout(() => setRebalanceSuccess(false), 2200);
+      window.setTimeout(() => setRebalanceSuccess(false), 1800);
     } catch (error) {
       console.error("Rebalance failed:", error);
     } finally {
@@ -358,277 +393,373 @@ export default function Home() {
 
   if (!isConnected) {
     return (
-      <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#0a0a0f] px-6 text-white">
-        <div className="absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#00ff88]/10 blur-3xl" />
-        <div className="absolute bottom-0 right-0 h-80 w-80 rounded-full bg-[#7c3aed]/20 blur-3xl" />
-        <section className="relative w-full max-w-xl text-center">
-          <p className="mb-4 text-xs font-semibold uppercase tracking-[0.26em] text-[#00ff88]">
-            Mantle Native Yield
-          </p>
-          <h1 className="mb-5 bg-gradient-to-r from-white via-[#00ff88] to-[#7c3aed] bg-clip-text text-6xl font-black tracking-tight text-transparent sm:text-7xl">
-            YieldMind
-          </h1>
-          <p className="mx-auto mb-9 max-w-md text-lg leading-8 text-slate-300">
-            Let AI manage your yield. Always earning more.
-          </p>
+      <main className="relative flex min-h-screen overflow-hidden bg-black px-6 text-white">
+        <AmbientBackground />
+        <section className="relative z-10 mx-auto flex w-full max-w-4xl flex-col items-center justify-center text-center">
+          <div className="animate-fade-in opacity-0 [animation-delay:120ms] [animation-fill-mode:forwards]">
+            <h1 className="logo-shimmer text-6xl font-black sm:text-8xl">YieldMind</h1>
+            <p className="mt-6 text-base leading-7 text-[#6b7280] sm:text-xl">
+              Autonomous yield optimization. Powered by AI. Built on Mantle.
+            </p>
+          </div>
           <button
             onClick={connectWallet}
-            className="w-full max-w-xs rounded-xl bg-[#00ff88] px-7 py-4 text-base font-bold text-[#07100b] shadow-[0_0_35px_rgba(0,255,136,0.35)] transition duration-300 hover:-translate-y-0.5 hover:bg-[#35ffa2]"
+            className="glow-pulse mt-10 rounded-2xl bg-[#00ff88] px-9 py-4 text-base font-black text-black transition duration-300 hover:scale-[1.02] hover:shadow-[0_0_42px_rgba(0,255,136,0.55)]"
           >
             Connect Wallet
           </button>
           {walletError ? <p className="mt-4 text-sm text-red-300">{walletError}</p> : null}
-          <div className="mt-8 flex flex-wrap justify-center gap-3">
-            {["AI Managed", "On-Chain Transparent", "Mantle Native"].map((feature) => (
-              <span
-                key={feature}
-                className="rounded-full border border-white/10 bg-white/[0.06] px-4 py-2 text-xs font-semibold text-slate-200 shadow-xl backdrop-blur"
-              >
-                {feature}
-              </span>
-            ))}
+          <div className="mt-8 grid w-full max-w-2xl gap-3 sm:grid-cols-3">
+            <FeaturePill icon="AI" label="AI Managed" />
+            <FeaturePill icon="OC" label="On-Chain Transparent" />
+            <FeaturePill icon="MN" label="Mantle Native" />
           </div>
+          <p className="absolute bottom-8 text-xs font-semibold uppercase text-[#6b7280]">
+            Powered by Mantle Network
+          </p>
         </section>
+        <GlobalStyles />
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[#0a0a0f] px-5 pb-28 pt-6 text-white sm:px-8">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(0,255,136,0.13),transparent_32%),radial-gradient(circle_at_85%_20%,rgba(124,58,237,0.18),transparent_28%)]" />
-      <div className="relative mx-auto max-w-7xl">
-        <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <main className="relative min-h-screen overflow-hidden bg-black px-4 pb-20 pt-4 text-white sm:px-6">
+      <AmbientBackground />
+      <div className="relative z-10 mx-auto flex min-h-[calc(100vh-6rem)] max-w-7xl flex-col gap-4">
+        <nav className="animate-fade-in flex items-center justify-between opacity-0 [animation-delay:60ms] [animation-fill-mode:forwards]">
           <div className="flex items-center gap-3">
-            <span className="relative flex h-3 w-3">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00ff88] opacity-70" />
-              <span className="relative inline-flex h-3 w-3 rounded-full bg-[#00ff88]" />
-            </span>
+            <PulseDot />
             <div>
-              <h1 className="text-3xl font-black tracking-tight">YieldMind</h1>
-              <p className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">AI Agent Live</p>
+              <h1 className="text-2xl font-black">YieldMind</h1>
+              <p className="text-[10px] font-bold uppercase text-[#6b7280]">AI Yield Terminal</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="rounded-full border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-medium text-slate-200 backdrop-blur">
+          <div className="flex items-center gap-2">
+            <span className="rounded-full border border-white/10 bg-white/[0.05] px-4 py-2 text-xs font-semibold text-gray-200 backdrop-blur-xl">
               {shortAddress}
             </span>
             <button
               onClick={() => disconnect()}
-              className="rounded-full border border-red-400/30 bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-200 transition hover:border-red-300 hover:bg-red-500/20"
+              className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-bold text-white transition duration-300 hover:scale-[1.02] hover:border-red-400/50 hover:text-red-200"
             >
               Disconnect
             </button>
           </div>
-        </header>
+        </nav>
 
-        <section className="mb-6 grid gap-4 lg:grid-cols-3">
-          <StatCard label="Current Allocation">
-            <div className="flex items-center justify-between gap-4">
-              <p key={allocation} className="text-4xl font-black transition duration-500">
-                {allocation}
-              </p>
-              <span
-                className={`rounded-full px-3 py-1 text-xs font-bold ${
-                  isMeth ? "bg-[#7c3aed]/20 text-violet-200" : "bg-[#00ff88]/20 text-[#00ff88]"
-                }`}
-              >
-                {isMeth ? "mETH" : "USDY"}
-              </span>
+        <div className="line-sweep h-px w-full bg-white/10" />
+
+        <section className="grid gap-3 lg:grid-cols-4">
+          <TerminalCard delay="120ms">
+            <CardLabel>Current Allocation</CardLabel>
+            <div className="mt-4 flex items-center justify-between">
+              {allocation ? (
+                <span
+                  className={`rounded-2xl px-4 py-3 text-3xl font-black ${
+                    isMeth
+                      ? "bg-[#7c3aed]/20 text-violet-200 shadow-[0_0_30px_rgba(124,58,237,0.25)]"
+                      : "bg-[#00ff88]/15 text-[#00ff88] shadow-[0_0_30px_rgba(0,255,136,0.18)]"
+                  }`}
+                >
+                  {displayAllocation}
+                </span>
+              ) : (
+                <Skeleton className="h-14 w-32 rounded-2xl" />
+              )}
+              <span className="text-xs font-bold uppercase text-[#6b7280]">AI Managed</span>
             </div>
-          </StatCard>
-          <StatCard label="Your Deposit">
-            <div className="flex items-end justify-between gap-4">
-              <p key={String(userBalance)} className="text-4xl font-black transition duration-500">
-                {formatMnt(userBalance as bigint | undefined)} <span className="text-lg text-slate-400">MNT</span>
-              </p>
-              <span className="mb-1 rounded-full bg-[#00ff88]/15 px-3 py-1 text-xs font-bold text-[#00ff88]">
-                Upward
-              </span>
+          </TerminalCard>
+
+          <TerminalCard delay="180ms">
+            <CardLabel>Your Deposit</CardLabel>
+            <div className="mt-4 flex items-end justify-between">
+              <MetricNumber value={mntNumber(userBalance as bigint | undefined)} suffix=" MNT" />
+              <span className="text-2xl font-black text-[#00ff88]">↗</span>
             </div>
-          </StatCard>
-          <StatCard label="Total Vault TVL">
-            <p key={String(totalDeposits)} className="text-4xl font-black transition duration-500">
-              {formatMnt(totalDeposits as bigint | undefined)} <span className="text-lg text-slate-400">MNT</span>
-            </p>
-          </StatCard>
+          </TerminalCard>
+
+          <TerminalCard delay="240ms">
+            <CardLabel>Total Vault TVL</CardLabel>
+            <div className="mt-4">
+              <MetricNumber value={mntNumber(totalDeposits as bigint | undefined)} suffix=" MNT" />
+            </div>
+          </TerminalCard>
+
+          <TerminalCard delay="300ms">
+            <CardLabel>Agent Status</CardLabel>
+            <div className="mt-4 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <PulseDot />
+                <div>
+                  <p className="text-2xl font-black text-[#00ff88]">Active</p>
+                  <p className="text-xs text-[#6b7280]">Next check {formatTimer(secondsRemaining)}</p>
+                </div>
+              </div>
+            </div>
+          </TerminalCard>
         </section>
 
-        <section className="mb-6 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
-          <GlassCard className="p-6">
-            <div className="mb-6 flex items-center justify-between">
+        <section className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+          <TerminalCard className="min-h-[310px]" delay="360ms">
+            <div className="mb-5 flex items-start justify-between">
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Yield Comparison</p>
-                <h2 className="mt-2 text-2xl font-black">mETH vs USDY APY</h2>
+                <CardLabel>Yield Battle</CardLabel>
+                <h2 className="mt-1 text-2xl font-black">mETH vs USDY</h2>
               </div>
-              <span className="rounded-full bg-white/[0.06] px-3 py-1 text-xs font-semibold text-slate-300">
-                Live
+              <span className="flex items-center gap-2 rounded-full border border-red-400/20 bg-red-500/10 px-3 py-1 text-xs font-black text-red-200">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-red-400" />
+                LIVE
               </span>
             </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <YieldCard
+            <div className="grid gap-4 sm:grid-cols-2">
+              <YieldBattlePanel
                 name="mETH"
                 apy={yieldRates.mETH}
                 width={methWidth}
-                active={allocation === "mETH"}
+                winning={winningAsset === "mETH"}
                 color="#7c3aed"
               />
-              <YieldCard
+              <YieldBattlePanel
                 name="USDY"
                 apy={yieldRates.USDY}
                 width={usdyWidth}
-                active={allocation === "USDY"}
+                winning={winningAsset === "USDY"}
                 color="#00ff88"
               />
             </div>
-          </GlassCard>
+          </TerminalCard>
 
-          <GlassCard className="overflow-hidden p-0">
-            <div className="border-b border-white/10 p-6">
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Rebalance History</p>
-              <h2 className="mt-2 text-2xl font-black">AI Decisions</h2>
+          <TerminalCard className="min-h-[310px] overflow-hidden" delay="420ms">
+            <div className="mb-5 flex items-start justify-between">
+              <div>
+                <CardLabel>AI Decisions</CardLabel>
+                <h2 className="mt-1 text-2xl font-black">Decision Log</h2>
+              </div>
+              <span className="rounded-full border border-white/10 px-3 py-1 text-xs font-bold text-[#6b7280]">
+                Last 5
+              </span>
             </div>
             {history.length ? (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[560px] text-left text-sm">
-                  <thead className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                    <tr>
-                      <th className="px-6 py-4 font-semibold">Time</th>
-                      <th className="px-6 py-4 font-semibold">From</th>
-                      <th className="px-6 py-4 font-semibold">To</th>
-                      <th className="px-6 py-4 font-semibold">Reason</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {history.map((record) => (
-                      <tr key={record.id} className="border-t border-white/10 text-slate-300">
-                        <td className="px-6 py-4">{record.time}</td>
-                        <td className="px-6 py-4">{record.from}</td>
-                        <td className="px-6 py-4 text-[#00ff88]">{record.to}</td>
-                        <td className="px-6 py-4">{record.reason}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="max-h-[230px] space-y-3 overflow-y-auto pr-2">
+                {history.map((record) => (
+                  <div key={record.id} className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <span className="text-xs font-bold uppercase text-[#6b7280]">
+                        {record.timestamp ? timeAgo(record.timestamp) : "Just now"}
+                      </span>
+                      <span className="text-sm font-black text-white">
+                        {record.from} <span className="text-[#00ff88]">→</span> {record.to}
+                      </span>
+                    </div>
+                    <p className="text-sm leading-5 text-gray-400">{record.reason}</p>
+                  </div>
+                ))}
               </div>
             ) : (
-              <div className="flex min-h-56 items-center justify-center px-6 text-center">
-                <p className="text-sm text-slate-400">AI agent has not rebalanced yet</p>
+              <div className="flex min-h-[220px] flex-col items-center justify-center text-center">
+                <div className="mb-4 grid h-14 w-14 place-items-center rounded-2xl border border-white/10 bg-white/[0.04]">
+                  <span className="h-5 w-5 animate-ping rounded-full bg-[#00ff88]/60" />
+                </div>
+                <p className="text-sm text-[#6b7280]">AI agent is monitoring yields...</p>
               </div>
             )}
-          </GlassCard>
+          </TerminalCard>
         </section>
 
-        <GlassCard className="mb-6 p-6">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Manual Rebalance</p>
-              <h2 className="mt-2 text-2xl font-black">Switch Allocation</h2>
-              <p className="mt-2 text-sm text-slate-400">
-                Switches allocation between mETH and USDY — AI agent does this automatically every hour
-              </p>
-            </div>
-            <button
-              onClick={handleRebalance}
-              disabled={rebalancePending || !canManualRebalance}
-              className="inline-flex min-h-14 items-center justify-center gap-3 rounded-xl bg-[#7c3aed] px-7 py-4 text-base font-black text-white shadow-[0_0_34px_rgba(124,58,237,0.32)] transition duration-300 hover:-translate-y-0.5 hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
-            >
-              {rebalancePending ? (
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-              ) : null}
-              {rebalancePending ? "Processing..." : rebalanceSuccess ? "Rebalanced!" : "Trigger Rebalance"}
-            </button>
-          </div>
-        </GlassCard>
-
-        <section className="grid gap-4 lg:grid-cols-2">
-          <ActionPanel
+        <section className="grid gap-4 lg:grid-cols-3">
+          <ActionCard
             title="Deposit"
             balanceLabel={`Wallet balance ${formatMnt(walletBalance?.value)} MNT`}
             amount={depositAmount}
             onAmountChange={setDepositAmount}
             onSubmit={handleDeposit}
-            buttonLabel={depositPending ? "Processing..." : "Deposit"}
-            buttonClassName="bg-[#00ff88] text-[#07100b] shadow-[0_0_28px_rgba(0,255,136,0.22)] hover:bg-[#35ffa2]"
-            disabled={depositPending}
-            successMessage={depositSuccess}
+            pending={depositPending}
+            success={depositSuccess}
+            idleLabel="Deposit"
+            pendingLabel="Processing..."
+            successLabel="✓ Deposited"
+            buttonClassName="bg-[#00ff88] text-black shadow-[0_0_26px_rgba(0,255,136,0.24)] hover:shadow-[0_0_38px_rgba(0,255,136,0.42)]"
           />
-          <ActionPanel
+
+          <ActionCard
             title="Withdraw"
             balanceLabel={`Vault balance ${formatMnt(userBalance as bigint | undefined)} MNT`}
             amount={withdrawAmount}
             onAmountChange={setWithdrawAmount}
             onSubmit={handleWithdraw}
-            buttonLabel={withdrawPending ? "Processing..." : "Withdraw"}
-            buttonClassName="bg-red-500 text-white shadow-[0_0_28px_rgba(239,68,68,0.18)] hover:bg-red-400"
-            disabled={withdrawPending}
-            successMessage={withdrawSuccess}
+            pending={withdrawPending}
+            success={withdrawSuccess}
+            idleLabel="Withdraw"
+            pendingLabel="Processing..."
+            successLabel="✓ Withdrawn"
+            buttonClassName="bg-red-500 text-white shadow-[0_0_26px_rgba(239,68,68,0.2)] hover:shadow-[0_0_38px_rgba(239,68,68,0.38)]"
           />
+
+          <TerminalCard delay="600ms">
+            <CardLabel>Manual Override</CardLabel>
+            <h2 className="mt-2 text-2xl font-black">Rebalance Card</h2>
+            <div className="my-5 rounded-2xl border border-white/10 bg-black/30 p-4">
+              <p className="text-xs font-bold uppercase text-[#6b7280]">Current Allocation</p>
+              {allocation ? (
+                <p className={`mt-2 text-3xl font-black ${isMeth ? "text-violet-300" : "text-[#00ff88]"}`}>
+                  {displayAllocation}
+                </p>
+              ) : (
+                <Skeleton className="mt-3 h-10 w-28 rounded-xl" />
+              )}
+            </div>
+            <button
+              onClick={handleRebalance}
+              disabled={rebalancePending || !canManualRebalance}
+              className={`flex w-full items-center justify-center gap-3 rounded-2xl px-5 py-4 text-base font-black transition duration-300 hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100 ${
+                rebalanceSuccess
+                  ? "bg-white text-black"
+                  : "bg-[#7c3aed] text-white shadow-[0_0_28px_rgba(124,58,237,0.35)] hover:shadow-[0_0_42px_rgba(124,58,237,0.55)]"
+              }`}
+            >
+              {rebalancePending ? <Spinner /> : null}
+              {rebalancePending ? "Processing..." : rebalanceSuccess ? "✓ Rebalanced" : "Trigger Rebalance"}
+            </button>
+            <p className="mt-3 text-xs leading-5 text-[#6b7280]">AI rebalances automatically. This is manual override.</p>
+          </TerminalCard>
         </section>
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-white/10 bg-[#0a0a0f]/80 px-5 py-4 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center gap-3 text-sm font-medium text-slate-200">
-          <span className="relative flex h-3 w-3 shrink-0">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00ff88] opacity-70" />
-            <span className="relative inline-flex h-3 w-3 rounded-full bg-[#00ff88]" />
-          </span>
-          <span>AI Agent Active — Next yield check in {minutesRemaining} minutes</span>
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-black/70 px-4 py-3 backdrop-blur-xl">
+        <div className="mx-auto grid max-w-7xl items-center gap-2 text-xs font-bold text-gray-300 sm:grid-cols-3">
+          <div className="flex items-center gap-3">
+            <PulseDot />
+            <span>AI Agent Active</span>
+          </div>
+          <div className="text-left text-[#00ff88] sm:text-center">Next yield check in {formatTimer(secondsRemaining)}</div>
+          <div className="text-left text-[#6b7280] sm:text-right">
+            Built on <span className="text-[#00ff88]">Mantle Network</span>
+          </div>
         </div>
       </div>
+      <GlobalStyles />
     </main>
   );
 }
 
-function GlassCard({ children, className = "" }: { children: ReactNode; className?: string }) {
+function AmbientBackground() {
+  return (
+    <>
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:44px_44px]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_18%,rgba(0,255,136,0.12),transparent_30%),radial-gradient(circle_at_78%_12%,rgba(124,58,237,0.16),transparent_28%),radial-gradient(circle_at_50%_95%,rgba(0,255,136,0.06),transparent_28%)]" />
+      <div className="particle particle-a" />
+      <div className="particle particle-b" />
+      <div className="particle particle-c" />
+      <div className="particle particle-d" />
+    </>
+  );
+}
+
+function FeaturePill({ icon, label }: { icon: string; label: string }) {
+  return (
+    <div className="animate-fade-in rounded-2xl border border-white/10 bg-white/[0.045] p-4 opacity-0 shadow-2xl backdrop-blur-xl [animation-delay:360ms] [animation-fill-mode:forwards]">
+      <div className="mx-auto mb-3 grid h-9 w-9 place-items-center rounded-full border border-[#00ff88]/25 bg-[#00ff88]/10 text-[10px] font-black text-[#00ff88]">
+        {icon}
+      </div>
+      <p className="text-sm font-bold text-white">{label}</p>
+    </div>
+  );
+}
+
+function TerminalCard({ children, className = "", delay = "0ms" }: { children: ReactNode; className?: string; delay?: string }) {
   return (
     <div
-      className={`rounded-2xl border border-white/10 bg-white/[0.055] shadow-2xl shadow-black/30 backdrop-blur-xl ${className}`}
+      className={`animate-fade-in rounded-3xl border border-white/10 bg-white/[0.045] p-5 opacity-0 shadow-2xl shadow-black/40 backdrop-blur-xl transition duration-300 hover:border-white/20 ${className}`}
+      style={{ animationDelay: delay, animationFillMode: "forwards" }}
     >
       {children}
     </div>
   );
 }
 
-function StatCard({ label, children }: { label: string; children: ReactNode }) {
+function CardLabel({ children }: { children: ReactNode }) {
+  return <p className="text-[10px] font-black uppercase text-[#6b7280]">{children}</p>;
+}
+
+function PulseDot() {
   return (
-    <GlassCard className="p-6 transition duration-300 hover:-translate-y-1 hover:border-[#00ff88]/30">
-      <p className="mb-4 text-xs font-bold uppercase tracking-[0.2em] text-slate-500">{label}</p>
-      {children}
-    </GlassCard>
+    <span className="relative flex h-3 w-3 shrink-0">
+      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00ff88] opacity-70" />
+      <span className="relative inline-flex h-3 w-3 rounded-full bg-[#00ff88]" />
+    </span>
   );
 }
 
-function YieldCard({
+function Skeleton({ className = "" }: { className?: string }) {
+  return <div className={`skeleton bg-white/[0.06] ${className}`} />;
+}
+
+function Spinner() {
+  return <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />;
+}
+
+function MetricNumber({ value, suffix }: { value: number; suffix: string }) {
+  const [displayValue, setDisplayValue] = useState(0);
+
+  useEffect(() => {
+    let frame = 0;
+    const start = performance.now();
+    const duration = 850;
+
+    function tick(now: number) {
+      const progress = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplayValue(value * eased);
+
+      if (progress < 1) {
+        frame = requestAnimationFrame(tick);
+      }
+    }
+
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [value]);
+
+  return (
+    <p className="text-3xl font-black text-white">
+      {displayValue.toFixed(4)}
+      <span className="ml-1 text-sm font-bold text-[#6b7280]">{suffix}</span>
+    </p>
+  );
+}
+
+function YieldBattlePanel({
   name,
   apy,
   width,
-  active,
+  winning,
   color,
 }: {
   name: string;
   apy: number;
   width: string;
-  active: boolean;
+  winning: boolean;
   color: string;
 }) {
   return (
     <div
-      className={`rounded-2xl border bg-black/20 p-5 transition duration-500 ${
-        active ? "border-white/30 shadow-[0_0_36px_rgba(0,255,136,0.18)]" : "border-white/10"
+      className={`rounded-3xl border bg-black/35 p-5 transition duration-300 hover:scale-[1.02] ${
+        winning ? "border-white/25 shadow-[0_0_34px_rgba(0,255,136,0.18)]" : "border-white/10"
       }`}
     >
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <p className="text-sm font-bold">{name}</p>
-          <p className="text-xs text-slate-500">{active ? "Active allocation" : "Available strategy"}</p>
-        </div>
-        <p className="text-3xl font-black" style={{ color }}>
-          {formatPercent(apy)}
-        </p>
+      <div className="mb-5 flex items-center justify-between gap-3">
+        <p className="text-lg font-black">{name}</p>
+        {winning ? (
+          <span className="rounded-full bg-[#00ff88]/15 px-3 py-1 text-[10px] font-black text-[#00ff88]">WINNING</span>
+        ) : null}
       </div>
-      <div className="h-3 overflow-hidden rounded-full bg-white/10">
+      <p className="mb-5 text-5xl font-black" style={{ color }}>
+        {formatPercent(apy)}
+      </p>
+      <div className="h-2 overflow-hidden rounded-full bg-white/10">
         <div
-          className="h-full rounded-full transition-all duration-700"
+          className="yield-bar h-full rounded-full"
           style={{
             width,
             backgroundColor: color,
@@ -640,37 +771,39 @@ function YieldCard({
   );
 }
 
-function ActionPanel({
+function ActionCard({
   title,
   balanceLabel,
   amount,
   onAmountChange,
   onSubmit,
-  buttonLabel,
+  pending,
+  success,
+  idleLabel,
+  pendingLabel,
+  successLabel,
   buttonClassName,
-  disabled = false,
-  successMessage = "",
 }: {
   title: string;
   balanceLabel: string;
   amount: string;
   onAmountChange: (amount: string) => void;
   onSubmit: () => Promise<void>;
-  buttonLabel: string;
+  pending: boolean;
+  success: boolean;
+  idleLabel: string;
+  pendingLabel: string;
+  successLabel: string;
   buttonClassName: string;
-  disabled?: boolean;
-  successMessage?: string;
 }) {
   return (
-    <GlassCard className="p-6">
-      <div className="mb-5 flex items-start justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">{title}</p>
-          <h2 className="mt-2 text-2xl font-black">{title} MNT</h2>
-        </div>
-        <p className="rounded-full bg-white/[0.06] px-3 py-1 text-xs font-semibold text-slate-300">{balanceLabel}</p>
+    <TerminalCard delay={title === "Deposit" ? "480ms" : "540ms"}>
+      <CardLabel>{title}</CardLabel>
+      <div className="mt-2 flex items-center justify-between">
+        <h2 className="text-2xl font-black">{title} MNT</h2>
+        <span className="text-xs font-semibold text-[#6b7280]">{balanceLabel}</span>
       </div>
-      <div className="relative mb-4">
+      <div className="relative my-5">
         <input
           type="number"
           min="0"
@@ -679,20 +812,174 @@ function ActionPanel({
           placeholder="0.0000"
           value={amount}
           onChange={(event) => onAmountChange(event.target.value)}
-          className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-4 pr-16 text-lg font-semibold text-white outline-none transition placeholder:text-slate-600 focus:border-[#00ff88]/70 focus:bg-black/40"
+          className="w-full rounded-2xl border border-white/10 bg-black/45 px-4 py-4 pr-16 text-lg font-black text-white outline-none transition duration-300 placeholder:text-[#6b7280] focus:border-[#00ff88]/60"
         />
-        <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400">
+        <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm font-black text-[#6b7280]">
           MNT
         </span>
       </div>
       <button
         onClick={onSubmit}
-        disabled={disabled}
-        className={`w-full rounded-xl px-5 py-4 text-base font-black transition duration-300 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 ${buttonClassName}`}
+        disabled={pending}
+        className={`flex w-full items-center justify-center gap-3 rounded-2xl px-5 py-4 text-base font-black transition duration-300 hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:scale-100 ${
+          success ? "bg-white text-black shadow-[0_0_34px_rgba(255,255,255,0.24)]" : buttonClassName
+        }`}
       >
-        {buttonLabel}
+        {pending ? <Spinner /> : null}
+        {pending ? pendingLabel : success ? successLabel : idleLabel}
       </button>
-      {successMessage ? <p className="mt-3 text-sm font-semibold text-[#00ff88]">{successMessage}</p> : null}
-    </GlassCard>
+    </TerminalCard>
+  );
+}
+
+function GlobalStyles() {
+  return (
+    <style jsx global>{`
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(14px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes shimmerText {
+        0% {
+          background-position: -220% center;
+        }
+        100% {
+          background-position: 220% center;
+        }
+      }
+
+      @keyframes glowPulse {
+        0%,
+        100% {
+          box-shadow: 0 0 24px rgba(0, 255, 136, 0.28);
+        }
+        50% {
+          box-shadow: 0 0 52px rgba(0, 255, 136, 0.52);
+        }
+      }
+
+      @keyframes lineSweep {
+        from {
+          transform: scaleX(0);
+          transform-origin: left;
+        }
+        to {
+          transform: scaleX(1);
+          transform-origin: left;
+        }
+      }
+
+      @keyframes floatParticle {
+        0% {
+          transform: translate3d(0, 0, 0);
+          opacity: 0.18;
+        }
+        50% {
+          transform: translate3d(38px, -42px, 0);
+          opacity: 0.5;
+        }
+        100% {
+          transform: translate3d(0, 0, 0);
+          opacity: 0.18;
+        }
+      }
+
+      @keyframes skeletonShimmer {
+        from {
+          background-position: -220% 0;
+        }
+        to {
+          background-position: 220% 0;
+        }
+      }
+
+      @keyframes yieldFill {
+        from {
+          transform: scaleX(0);
+          transform-origin: left;
+        }
+        to {
+          transform: scaleX(1);
+          transform-origin: left;
+        }
+      }
+
+      .animate-fade-in {
+        animation: fadeIn 720ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      .logo-shimmer {
+        background: linear-gradient(90deg, #ffffff 0%, #ffffff 34%, #00ff88 50%, #ffffff 66%, #ffffff 100%);
+        background-size: 220% auto;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        animation: shimmerText 3.6s linear infinite;
+      }
+
+      .glow-pulse {
+        animation: glowPulse 2.5s ease-in-out infinite;
+      }
+
+      .line-sweep {
+        background: linear-gradient(90deg, transparent, #00ff88, transparent);
+        animation: lineSweep 1.15s ease-out forwards;
+      }
+
+      .particle {
+        pointer-events: none;
+        position: absolute;
+        height: 5px;
+        width: 5px;
+        border-radius: 9999px;
+        background: #00ff88;
+        box-shadow: 0 0 22px rgba(0, 255, 136, 0.72);
+        animation: floatParticle 8s ease-in-out infinite;
+      }
+
+      .particle-a {
+        left: 12%;
+        top: 20%;
+      }
+
+      .particle-b {
+        left: 72%;
+        top: 16%;
+        animation-delay: 1.2s;
+        background: #7c3aed;
+        box-shadow: 0 0 22px rgba(124, 58, 237, 0.72);
+      }
+
+      .particle-c {
+        left: 82%;
+        top: 64%;
+        animation-delay: 2.3s;
+      }
+
+      .particle-d {
+        left: 22%;
+        top: 76%;
+        animation-delay: 3.1s;
+        background: #7c3aed;
+        box-shadow: 0 0 22px rgba(124, 58, 237, 0.72);
+      }
+
+      .skeleton {
+        background-image: linear-gradient(90deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04));
+        background-size: 220% 100%;
+        animation: skeletonShimmer 1.5s linear infinite;
+      }
+
+      .yield-bar {
+        animation: yieldFill 900ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+      }
+    `}</style>
   );
 }

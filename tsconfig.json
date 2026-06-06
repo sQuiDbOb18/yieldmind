@@ -10,5 +10,5 @@
     "rootDir": ".",
     "types": ["node", "mocha"]
   },
-  "include": ["scripts", "test", "hardhat.config.cjs"]
+  "include": ["scripts", "test", "hardhat.config.ts"]
 }

@@ -1,16 +1,10 @@
-const { ethers } = require("hardhat");
+import { ethers } from "hardhat";
 
 async function main() {
-  console.log("Deploying YieldVault...");
-
-  const YieldVault = await ethers.getContractFactory("YieldVault");
-  const vault = await YieldVault.deploy();
-
+  const vault = await ethers.deployContract("YieldVault");
   await vault.waitForDeployment();
 
-  const address = await vault.getAddress();
-  console.log("YieldVault deployed to:", address);
-  console.log("Save this address — you need it for submission!");
+  console.log(await vault.getAddress());
 }
 
 main().catch((error) => {

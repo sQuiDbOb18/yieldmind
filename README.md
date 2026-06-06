@@ -1,57 +1,94 @@
-# Sample Hardhat 3 Project (`mocha` and `ethers`)
+# YieldMind — AI-Powered Yield Optimizer on Mantle
 
-This project showcases a Hardhat 3 project using `mocha` for tests and the `ethers` library for Ethereum interactions.
+[![Mantle Network](https://img.shields.io/badge/Network-Mantle-00ff88)](https://www.mantle.xyz/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-To learn more about Hardhat 3, please visit the [Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3). To share your feedback, join our [Hardhat 3](https://hardhat.org/hardhat3-telegram-group) Telegram group or [open an issue](https://github.com/NomicFoundation/hardhat/issues/new) in our GitHub issue tracker.
+**Let AI manage your yield. Always earning more.**
 
-## Project Overview
+## Overview
 
-This example project includes:
+YieldMind is an autonomous yield optimization protocol built on Mantle Network. Users deposit MNT into a smart contract vault. An AI agent monitors yield rates across Mantle-native assets — mETH and USDY — every hour and automatically rebalances the vault allocation to whichever asset offers the highest return. Every rebalance decision is recorded on-chain for full transparency.
 
-- A simple Hardhat configuration file.
-- Foundry-compatible Solidity unit tests.
-- TypeScript integration tests using `mocha` and ethers.js
-- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
+## Problem
 
-## Usage
+DeFi yield rates change constantly. Most users either leave funds in a suboptimal asset or waste time manually monitoring and moving funds. There is no autonomous, transparent, on-chain solution for yield optimization on Mantle.
 
-### Running Tests
+## Solution
 
-To run all the tests in the project, execute the following command:
+YieldMind deploys a three-layer architecture: a Solidity vault contract, an AI agent, and a React dashboard. The agent runs continuously, fetches live APY data, makes allocation decisions, and executes rebalances via the smart contract. Users simply deposit and let the AI do the rest.
 
-```shell
-npx hardhat test
+## How It Works
+
+1. User deposits MNT into the YieldVault smart contract.
+2. AI agent fetches mETH APY and USDY APY every hour.
+3. If the spread between assets exceeds 0.5%, agent calls `rebalance()` on the contract.
+4. Allocation switches automatically, and the decision is recorded on-chain with timestamp and reason.
+
+## Tech Stack
+
+- **Smart Contract:** Solidity, Hardhat, deployed on Mantle Testnet
+- **AI Agent:** Node.js, ethers.js, node-cron, axios
+- **Frontend:** Next.js, Tailwind CSS, wagmi, viem
+- **Network:** Mantle Testnet (`chainId 5003`)
+
+## Contract Details
+
+- **Network:** Mantle Sepolia Testnet
+- **Contract Address:** `0x1Fa60f862190BBf44A75E0210AFdF51C7F4a9bf1`
+- **Explorer:** https://explorer.sepolia.mantle.xyz
+
+## Getting Started
+
+1. Clone the repo.
+
+```bash
+git clone <repo-url>
+cd yieldmind
 ```
 
-You can also selectively run the Solidity or `mocha` tests:
+2. Install dependencies in the root, agent, and frontend folders.
 
-```shell
-npx hardhat test solidity
-npx hardhat test mocha
+```bash
+npm install
+cd agent && npm install
+cd ../frontend && npm install
+cd ..
 ```
 
-### Make a deployment to Sepolia
+3. Create a `.env` file in the project root.
 
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
-
-To run the deployment to a local chain:
-
-```shell
-npx hardhat ignition deploy ignition/modules/Counter.ts
+```bash
+PRIVATE_KEY=your_key
 ```
 
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
+4. Run the AI agent.
 
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
-
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
-
-```shell
-npx hardhat keystore set SEPOLIA_PRIVATE_KEY
+```bash
+cd agent
+node agent.js
 ```
 
-After setting the variable, you can run the deployment with the Sepolia network:
+5. Run the frontend.
 
-```shell
-npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
+```bash
+cd frontend
+npm run dev
 ```
+
+6. Open the dashboard.
+
+```text
+http://localhost:3000
+```
+
+## Roadmap
+
+- **Phase 1 (current):** Vault contract + AI agent + dashboard on Mantle testnet
+- **Phase 2:** Direct integration with Mantle mETH and USDY token contracts for real fund movement
+- **Phase 3:** Multi-asset support, yield history charts, mobile app
+- **Phase 4:** Mainnet deployment with audited contracts
+
+## Live Demo
+
+- **Frontend:** `https://yieldmind-cqenitsff-jamess-projects1.vercel.app`
+- **Contract:** `https://sepolia.mantlescan.xyz/address/0x1Fa60f862190BBf44A75E0210AFdF51C7F4a9bf1`
