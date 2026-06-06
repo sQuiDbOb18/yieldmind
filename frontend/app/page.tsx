@@ -396,7 +396,7 @@ export default function Home() {
       <main className="relative flex min-h-screen overflow-hidden bg-black px-6 text-white">
         <AmbientBackground />
         <section className="relative z-10 mx-auto flex w-full max-w-4xl flex-col items-center justify-center text-center">
-          <div className="animate-fade-in opacity-0 [animation-delay:120ms] [animation-fill-mode:forwards]">
+          <div className="animate-fade-in [animation-delay:120ms] [animation-fill-mode:both]">
             <h1 className="logo-shimmer text-6xl font-black sm:text-8xl">YieldMind</h1>
             <p className="mt-6 text-base leading-7 text-[#6b7280] sm:text-xl">
               Autonomous yield optimization. Powered by AI. Built on Mantle.
@@ -414,10 +414,10 @@ export default function Home() {
             <FeaturePill icon="OC" label="On-Chain Transparent" />
             <FeaturePill icon="MN" label="Mantle Native" />
           </div>
-          <p className="absolute bottom-8 text-xs font-semibold uppercase text-[#6b7280]">
-            Powered by Mantle Network
-          </p>
         </section>
+        <p className="absolute bottom-8 left-1/2 z-10 -translate-x-1/2 text-xs font-semibold uppercase text-[#6b7280]">
+          Powered by Mantle Network
+        </p>
         <GlobalStyles />
       </main>
     );
@@ -441,7 +441,7 @@ export default function Home() {
             </span>
             <button
               onClick={() => disconnect()}
-              className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-bold text-white transition duration-300 hover:scale-[1.02] hover:border-red-400/50 hover:text-red-200"
+              className="rounded-full border border-red-400/45 bg-red-500/10 px-4 py-2 text-xs font-bold text-red-200 transition duration-300 hover:scale-[1.02] hover:border-red-300 hover:bg-red-500/20 hover:text-red-100"
             >
               Disconnect
             </button>
@@ -658,7 +658,7 @@ function AmbientBackground() {
 
 function FeaturePill({ icon, label }: { icon: string; label: string }) {
   return (
-    <div className="animate-fade-in rounded-2xl border border-white/10 bg-white/[0.045] p-4 opacity-0 shadow-2xl backdrop-blur-xl [animation-delay:360ms] [animation-fill-mode:forwards]">
+    <div className="animate-fade-in rounded-2xl border border-white/10 bg-white/[0.045] p-4 shadow-2xl backdrop-blur-xl [animation-delay:360ms] [animation-fill-mode:both]">
       <div className="mx-auto mb-3 grid h-9 w-9 place-items-center rounded-full border border-[#00ff88]/25 bg-[#00ff88]/10 text-[10px] font-black text-[#00ff88]">
         {icon}
       </div>
